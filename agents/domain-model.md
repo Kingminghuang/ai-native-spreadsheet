@@ -7,8 +7,8 @@ Implement the Table-first semantic model and the persistence foundations for Wor
 ## Read first
 
 - The target Linear issue and its parent phase.
-- `../docs/proposal.md` sections 3–8, 31, 34–36, 49, and 52.
-- `Frictionless_Table_Schema.md` for schema principles and `Table_App.md` for application structure when relevant.
+- [proposal.md](../docs/proposal.md) sections 3–8, 31, 34–36, 49, and 52.
+- [Frictionless_Table_Schema.md](../docs/Frictionless_Table_Schema.md) for schema principles and [Spreadsheet_UI.md](../docs/Spreadsheet_UI.md) for application structure when relevant.
 - The shared contract in [README.md](README.md).
 
 ## Responsibilities

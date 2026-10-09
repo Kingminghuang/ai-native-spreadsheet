@@ -185,6 +185,8 @@ Table = Table Schema
 Spreadsheet = Table Schema
 ```
 
+Table Schema 描述 Table 与 Field 的结构，不包含 Row 的实际数据值；Row 是按 Table Schema 解释的独立记录。Workbook/Page 及其布局属于 Workbook / View Spec，字段计算、数据变换和来源追踪分别属于 Calculation、Transform、Lineage / Revision Spec。
+
 ---
 
 # 4. Smart Spreadsheet Format
@@ -224,6 +226,7 @@ Relations
 
 ```json
 {
+  "id": "tbl_orders",
   "name": "orders",
   "fields": [
     {
@@ -239,6 +242,44 @@ Relations
   ]
 }
 ```
+
+`Table` 是 Workbook 中独立的语义数据对象；`Table Schema` 定义它的字段和关系。Table 的 `id` 是稳定身份，`name`、`description` 和 `metadata` 是可修改属性。`fields` 数组的顺序可用于默认展示顺序，但不能作为字段身份或依赖引用。
+
+每个 `Field` 至少有稳定 `id`、可修改 `name` 和逻辑 `type`，并可带有 `title`、`description`、`format`、`constraints` 和扩展 `metadata`。`constraints.enum` 表示字段允许的枚举值；`constraints` 还可表达 required、minimum、maximum、unique、长度等值约束。类型描述逻辑值，不由 CSV、Parquet 或其他物理存储表示决定。`number` 接受已有 JavaScript 有限 number（包含 `1e16`、`1e21`、`1e300`），`integer` 限于 ±(2^53−1) 的安全整数；NaN/Infinity 一律拒绝，DOUBLE 不承诺恢复进入 JavaScript 前已经丢失的整数精度。JSON 容器使用 plain 或 null prototype、自有可枚举数据属性和稠密数组；不接受会在序列化时转换/丢失的 Date、Map、类实例、undefined、bigint、typed array、getter 等值。
+
+`constraints.pattern` 使用有界无回溯语法子集：字面量、字符类、`.`、`^`、`$`、`*`、`+`、`?` 和单字符转义。分组、alternation、lookaround、backreference、counted/lazy quantifier 在执行前拒绝；匹配受长度与计算步数预算限制，超限产生校验问题。具体预算与迁移说明见 [Workbook Core README](../packages/workbook-core/README.md)。
+
+主键与外键都按 Field ID 引用字段；外键同时按 Table ID 引用目标表。联合键按有序 Field ID 列表表达，外键的规范属性为 `fields` / `reference.fields`（内容是 Field ID，不能使用旧草案实现的 `fieldIds` 形状）：
+
+```json
+{
+  "primaryKey": ["fld_order_id", "fld_line_no"],
+  "foreignKeys": [
+    {
+      "fields": ["fld_customer_id"],
+      "reference": {
+        "tableId": "tbl_customers",
+        "fields": ["fld_id"]
+      }
+    }
+  ]
+}
+```
+
+`Row` 是按 Table Schema 解释的独立数据记录，不属于 Schema 本身。它包含稳定 `id` 和按 Field ID 索引的逻辑值；字段值不靠列名、数组下标或行号定位：
+
+```json
+{
+  "id": "row_01J...",
+  "values": {
+    "fld_order_id": 1001,
+    "fld_customer_id": 42,
+    "fld_revenue": 99.5
+  }
+}
+```
+
+这些片段定义逻辑领域形状，不规定 Workbook Bundle 的文件拆分、编码或读写流程。
 
 其中内部引用必须优先使用：
 
@@ -256,7 +297,7 @@ B2
 C5
 ```
 
-Field Name 是 presentation metadata，不应作为内部依赖关系的唯一标识。
+`name`、`title` 和 `description` 是可修改的语义/展示元数据，不是身份。需要持久化的内部关系（例如 Calculation 的字段依赖、Transform 输入、主外键、View 对 Table 的引用）保存稳定 ID。表达式编辑界面可以接受字段名，但解析后的 Calculation Spec 必须保存 Field ID。
 
 ---
 
@@ -287,6 +328,8 @@ MVP 的 Computed Field 提供字段引用表达式 DSL，不实现完整 Excel �
   ]
 }
 ```
+
+P1 Bundle 校验明确的 `targetField` 和 `dependsOn`，`expression` 作为 JSON 透传，不按字符串内容或 ID 前缀推测引用。正式 DSL 文法、AST 语义与依赖提取由 LVB-81 交付，届时解析器维护明确依赖列表。
 
 Calculation 包括：
 
@@ -355,6 +398,8 @@ Workbook
     ├── Table
     └── Chart
 ```
+
+Workbook 是根领域对象，管理独立的 Table 定义与数据，也管理其下具有稳定 ID 的 Page 视图分组。Workbook 与 Page 的 `name` / `title` 都是可修改元数据。Page 中的 Table View 通过 `tableId` 引用独立的 Table，不复制 Table Schema 或数据，也不以 Page 名称、View 顺序或 Grid 坐标定义 Table 身份。Workbook/Page 与 Table/Field/Row 使用同一稳定 ID 约定（见 §36）；布局和显示顺序只属于 View Spec。
 
 负责：
 
@@ -695,7 +740,7 @@ Spreadsheet UI 每次提交 Prompt 时，应冻结一个 Context Snapshot。
 ```json
 {
   "workbookId": "sales",
-  "revision": 42,
+  "revisionId": "rev_01J...",
 
   "pageId": "page_orders",
   "tableId": "tbl_orders",
@@ -832,7 +877,7 @@ workbook_history
 ```json
 {
   "workbookId": "sales",
-  "baseRevision": 42,
+  "baseRevisionId": "rev_01J...",
 
   "operations": [
     {
@@ -1346,22 +1391,86 @@ distributed replica convergence
 Workbook 每个 commit 产生 Revision：
 
 ```text
-revision 42
-revision 43
-revision 44
+revision rev_01J... (sequence 0)
+revision rev_01K... (sequence 1)
+revision rev_01M... (sequence 2)
 ```
 
-每个 Agent 开始任务时读取一个 snapshot：
+`revisionId` 是 Revision 的稳定、不透明身份；不能由序号、时间、名称或内容位置推导，也不能在同一 Workbook 内重用。`sequence` 是单调递增的展示/排序序号，不是身份或引用。`parentRevisionId` 是 Revision 之间唯一的链路引用。Workbook 的 `currentRevisionId` 指向唯一当前 head。
+
+每个 Agent 开始任务时读取一个绑定到具体 `revisionId` 的 snapshot：
 
 ```text
 Agent A
-baseRevision = 42
+baseRevisionId = rev_01J...
 
 Agent B
-baseRevision = 42
+baseRevisionId = rev_01J...
 ```
 
 Agent 不直接修改 state，而是提交 Transaction。
+
+## Revision identity、提交链与读取
+
+每个已提交 Revision 都有唯一 `revisionId`、所属 `workbookId`、单调递增的 `sequence`、`parentRevisionId`、提交时间和完整状态快照。根 Revision 的 `parentRevisionId` 为 `null`、序号为 `0`；之后每个成功提交恰有一个 parent，序号比 parent 大一。每个非根 Revision 记录对应的 `transactionId`（在所属 Workbook 内唯一）；提交时间使用 RFC 3339 UTC 时间戳。提交者和简短说明可作为历史元数据；它们不替代 revision 身份。内部 Revision 引用一律使用 `revisionId`，序号只用于界面显示。
+
+一个 Workbook 只有一个权威提交 head。成功提交必须以提交时的 `currentRevisionId` 为 `parentRevisionId`，生成新的 Revision，不得改写既有快照或产生未标明关系的并行 head。提交若基于旧的 `baseRevisionId`，WorkbookService 必须拒绝，或先显式校验/重放变更；重放成功后，Revision 的 parent 是实际当前 head，并在事务/修订元数据中通过 `submittedAgainstRevisionId` 保留原始 `baseRevisionId`。未提交的 proposal 不产生 Revision。
+
+快照表示指定 Revision 的完整、不可变 Workbook 状态：Workbook 元数据、Page/View、Table Schema、全部 Row 数据、Calculation、Transform、Chart 和已提交的 Lineage。所有对象间关系继续使用稳定语义 ID。`readRevision(workbookId, revisionId)` 只返回这一状态；`readCurrent(workbookId)` 先解析一次当前 head，再读取该 Revision 的快照。任何读取都不得混合不同 Revision 的文件；找不到 Revision、缺少快照内容或引用校验失败时，必须整体失败，不能返回部分 Workbook。
+
+## 可移植历史档案
+
+Workbook Bundle v1 仍以根目录的 `workbook.json` 和其 manifest entries 表达一个当前 Workbook 状态。历史是由 LVB-79 定义的可选档案 profile；启用后，不改变 Bundle v1 的核心 `formatVersion` 或 entries 语义，并将 `revision-history-v1` 列入根 manifest 的 `requiredFeatures`，同时在 `extensions.revisionHistory.path` 指向历史索引。不支持该特性的读取方按 Bundle v1 规则明确失败，避免静默丢失历史。
+
+根 manifest 的扩展示例：
+
+```json
+{
+  "requiredFeatures": ["revision-history-v1"],
+  "extensions": {
+    "revisionHistory": { "path": "history/index.json" }
+  }
+}
+```
+
+历史索引为 UTF-8 JSON，列出 Workbook 的所有 Revision，按 parent 在前的拓扑顺序排列：
+
+```json
+{
+  "format": "ai-native-spreadsheet-revision-history",
+  "formatVersion": 1,
+  "workbookId": "wb_01J...",
+  "currentRevisionId": "rev_01K...",
+  "revisions": [
+    {
+      "revisionId": "rev_01J...",
+      "sequence": 0,
+      "parentRevisionId": null,
+      "committedAt": "2026-10-08T09:00:00Z",
+      "transactionId": null,
+      "actorId": null,
+      "submittedAgainstRevisionId": null,
+      "summary": "Initial workbook",
+      "snapshotPath": "history/snapshots/rev_01J..."
+    },
+    {
+      "revisionId": "rev_01K...",
+      "sequence": 1,
+      "parentRevisionId": "rev_01J...",
+      "committedAt": "2026-10-08T09:05:00Z",
+      "transactionId": "tx_01K...",
+      "actorId": "agent_01J...",
+      "submittedAgainstRevisionId": "rev_01J...",
+      "summary": "Add margin field",
+      "snapshotPath": "history/snapshots/rev_01K..."
+    }
+  ]
+}
+```
+
+每个 `snapshotPath` 都定位到一份完整、可独立读取的 Bundle v1 快照，内含该 Revision 的 manifest、规格文档与 Table 数据；快照的 `workbookId` 必须与索引一致。根目录 `workbook.json` 表示 `currentRevisionId` 对应的同一状态，供当前 Workbook 读取；索引和被引用的快照共同构成历史档案。路径是相对 Bundle 根目录的路径，不是实体身份。
+
+读取方验证 revision ID 唯一、parent 存在且无环、除根外每个 Revision 只有一个 parent、序号递增、当前 head 存在并与根 Bundle 状态一致。历史索引或任一被声明保留的快照缺失/无效时，历史档案整体导入失败。写入方必须以一个完整发布单元保存新快照、历史索引和当前 head，使读取方不会观察到指向缺失快照的 head。
 
 ---
 
@@ -1375,7 +1484,7 @@ Agent 不直接修改 state，而是提交 Transaction。
 
   "transactionId": "tx_agent_a",
 
-  "baseRevision": 42,
+  "baseRevisionId": "rev_01J...",
 
   "mode": "proposal",
 
@@ -1439,28 +1548,22 @@ interface SpreadsheetOperation {
 资源可以定义成：
 
 ```text
-workbook:sales
+workbook:wb_01J...
 
-table:orders
+page:pg_01J...
 
-table:orders/schema
+table:tbl_01J...
 
-field:orders.revenue
+field:tbl_01J...:fld_01J...
 
-field:orders.cost
+row:tbl_01J...:row_01J...
 
-field:orders.margin
+chart:cht_01J...
 
-row:orders:123
-
-rows:orders:*
-
-chart:revenue_by_week
-
-transform:weekly_sales
+transform:trf_01J...
 ```
 
-因此系统可以判断两个 Agent 是否真的发生冲突。
+资源身份使用实体 ID；Field 和 Row 引用可携带所属 Table ID 以明确作用域。名称与显示文字可变，因此不能作为冲突检测或内部依赖关系的唯一键。系统据此判断两个 Agent 是否真的发生冲突。
 
 ---
 
@@ -1526,23 +1629,25 @@ field name
 
 这是并发设计的重要基础。
 
-不要：
+Workbook、Page、Table、Field、Row 都必须有稳定的语义 ID。ID 是不透明且不可变的标识，不由对象名称、展示标签、顺序、数据值或 Grid 坐标生成。Workbook ID 在应用命名空间内唯一；Page、Table、Field ID 在所属 Workbook 内唯一；Row ID 在所属 Table 内唯一。需要跨所属对象引用 Field 或 Row 时，同时携带所属 Table ID。
+
+ID 在对象重命名、同一 Workbook 内移动或重排，以及其他展示属性修改后保持不变。删除后不重用 ID；新建或复制对象时分配新 ID。字符串前缀可帮助阅读（例如 `wb_`、`pg_`、`tbl_`、`fld_`、`row_`），但不决定外部 ID 的有效性或实体种类；相等比较仍使用完整 ID 字符串。生成器可继续产生前缀；外部无前缀 UUID/ULID 或其他不透明 ID 同样有效。Bundle v1 允许的可移植拼写为 `[A-Za-z0-9][A-Za-z0-9._~-]{0,159}`；实体种类由引用上下文与类型品牌约束，不能从前缀推导。
+
+不要把可变名称作为唯一引用：
 
 ```text
 revenue
 cost
 ```
 
-作为唯一 reference。
-
-而是：
+也不要用 A1 坐标、行号或列号表示内部关系。应使用稳定 ID：
 
 ```text
 fld_1023
 fld_1024
 ```
 
-例如：
+例如，Field 的稳定 ID 与可变名称分开保存：
 
 ```text
 fieldId = fld_1023
@@ -1555,7 +1660,7 @@ Rename：
 revenue → sales
 ```
 
-不会改变：
+不会改变 Field ID 或以该 ID 保存的内部依赖：
 
 ```text
 fld_1023
@@ -1582,8 +1687,8 @@ CONFLICT
 {
   "status": "REBASE_REQUIRED",
 
-  "baseRevision": 42,
-  "currentRevision": 45,
+  "baseRevisionId": "rev_01J...",
+  "currentRevisionId": "rev_01M...",
 
   "changesSinceBase": [
     {
@@ -1712,7 +1817,7 @@ Sales by Customer
 然后：
 
 ```text
-revision 42 → 43
+revision rev_01J... → rev_01K...
 ```
 
 只产生一个原子 commit。
@@ -1787,7 +1892,7 @@ proposal / preview
 {
   "transactionId": "tx_123",
 
-  "baseRevision": 42,
+  "baseRevisionId": "rev_01J...",
 
   "status": "preview",
 
@@ -1799,7 +1904,7 @@ proposal / preview
 
 Spreadsheet UI 将该 Proposal 投影到当前 Workbook。
 
-但真实 authoritative Workbook 仍保持 revision 42。
+但真实 authoritative Workbook 仍保持 `rev_01J...`。
 
 用户点击：
 
@@ -1810,7 +1915,7 @@ Apply
 以后才：
 
 ```text
-revision 42 → 43
+revision rev_01J... → rev_01K...
 ```
 
 ---
@@ -1820,9 +1925,9 @@ revision 42 → 43
 每次 Commit 都必须形成完整 ChangeSet：
 
 ```text
-revision 42
+revision rev_01J...
    ↓ tx123
-revision 43
+revision rev_01K...
 ```
 
 因此 Undo 可以是：
@@ -1853,9 +1958,9 @@ Transaction
 │
 ├── writeSet
 │
-├── baseRevision
+├── baseRevisionId
 │
-├── resultRevision
+├── resultRevisionId
 │
 └── lineage
 ```
@@ -2047,6 +2152,77 @@ Workbook Bundle
     ├── orders.parquet
     └── customers.parquet
 ```
+
+## Workbook Bundle v1 合约
+
+Bundle 是一个目录树；`workbook.json` 是唯一入口，也是 Workbook manifest。实现可以在传输时把目录树包装成归档，但解包后的相对路径和文件内容必须遵循同一合约。JSON 使用 UTF-8。Manifest 明确列出每个文件的位置；读取方不得从 Workbook、Table、Field 或 Page 名称推导路径。
+
+最小 manifest 形状如下。路径是相对 Bundle 根目录的文件路径，只用于定位文件；实体身份始终来自稳定 ID：
+
+```json
+{
+  "format": "ai-native-spreadsheet-workbook-bundle",
+  "formatVersion": 1,
+  "workbook": {
+    "id": "wb_01J...",
+    "name": "Sales",
+    "metadata": {}
+  },
+  "entries": {
+    "schemas": [
+      { "tableId": "tbl_01J...", "path": "schemas/orders.json" }
+    ],
+    "calculations": [
+      { "id": "calc_01J...", "path": "calculations/margin.json" }
+    ],
+    "transforms": [
+      { "id": "trf_01J...", "path": "transforms/weekly-sales.json" }
+    ],
+    "views": [
+      { "pageId": "pg_01J...", "path": "views/orders.json" }
+    ],
+    "lineage": { "path": "lineage/lineage.json" },
+    "tables": [
+      { "tableId": "tbl_01J...", "path": "tables/orders.parquet" }
+    ]
+  },
+  "requiredFeatures": [],
+  "extensions": {}
+}
+```
+
+每个 Schema、Calculation、Transform、Page/View 和 Lineage JSON 文档都在顶层包含 `specVersion: 1`。Schema 文档包含一个 Table 及其 Fields、键和关系；Table 的稳定 ID 必须与 manifest 中的 `tableId` 一致。Page 文档保存 Page 元数据、`viewSettings` 和其 Views；每个 Table View 通过 `tableId` 引用 Schema 中的 Table，不复制 Schema 或数据。Calculation 与 Transform 文档分别保存各自的规格，不并入 Schema。Lineage 文档包含 `records` 数组；每条记录可用 `references` 数组表达 Workbook 内实体引用，每个引用含 `kind`、`id`，Field 和 Row 引用还必须含 `tableId`。`kind` 可为 `workbook`、`page`、`table`、`field`、`row`、`calculation` 或 `transform`。Lineage 的提交者、Transaction 等外部来源信息作为记录内容保留，不与 Workbook 实体引用混淆。Revision 快照和历史索引不属于 v1 Bundle 合约，由 LVB-79 定义。
+
+每个 Table 恰有一个 Schema 文档和一个 Parquet 数据文件；空表也写出带有完整列定义、零数据行的 Parquet 文件。Parquet 数据文件包含 `_row_id` 列，以及每个 Field 对应的 `field:<fieldId>` 列。`_row_id` 的值是稳定 Row ID；Field 列名后缀是稳定 Field ID。物理列顺序只影响存储布局，不表示字段身份或默认展示顺序；默认展示顺序仍由 Schema 的 `fields` 顺序决定。Bundle v1 的逻辑值类型使用以下 Parquet 表示：
+
+| Schema Field `type` | Parquet 表示 |
+| - | - |
+| `string`, `date`, `datetime`, `time`, `year`, `yearmonth`, `duration` | UTF-8 string，保留逻辑值的字符串内容 |
+| `number` | `DOUBLE` |
+| `integer` | `INT64`；接受无注解、`INT_64`、`INTEGER(64,true)` 或二者一致组合；逻辑值限于 JavaScript 安全整数范围 |
+| `boolean` | `BOOLEAN` |
+| `object`, `array`, `geojson`, `geopoint`, `any` | Parquet `JSON` 字段，值按 JSON 编码 |
+
+缺失字段值按逻辑 `null` 写读。其他或未知 Field 类型必须明确报错；不能静默截断、舍入或转换。读取器验证 Parquet 列的物理表示与此映射一致；timestamp、decimal、unsigned 或互相冲突的注解不能仅凭 INT64 物理类型通过。
+
+## 写入与读取边界
+
+- 写入方从一个已提交的 Workbook 状态序列化 Workbook 元数据、Schema、Calculation、Transform、Page/View、Lineage 和各 Table 数据。它保留稳定 ID 与规格边界，不把展示名称、Grid 坐标或文件路径写成内部引用。
+- 读取方从 `workbook.json` 开始，只读取 manifest 列出的文件；路径必须是根目录内的相对路径，归一化后不得逃逸 Bundle 根目录，也不得有重复路径。缺失文件、重复实体 ID、重复 Field/Row ID、格式不符或无法解析的必需引用都会使整个 Bundle 导入失败；不得返回部分载入的 Workbook。
+- 读取方先收集各文档声明的 ID，再解析引用：Schema 的主外键、Calculation 的目标 Field 与依赖、Transform 的输入/输出 Table、Page/View 的目标对象以及 Lineage 的实体引用都必须存在，并且所属 Table 范围必须匹配。每个 Parquet 文件的 Field 列集合必须与其 Schema 一一对应；每行的 `_row_id` 必须存在且在该 Table 内唯一。Parquet 列名和行号不是语义身份。
+- JSON 文档中的规格与 Parquet 数据共同构成一个 Workbook 状态。导入保留计算表达式、Transform、View 与 Lineage 规格；是否执行计算或 Transform 属于 WorkbookService，不属于 Bundle 读取器。
+
+## 目录所有权、提交与导入资源边界
+
+保存只初始化新目录，或替换经过完整校验、只包含声明文件与必要容器目录的 Bundle。当前工作目录及其祖先、文件系统根目录、根 symlink、普通目录、伪造标记、含额外文件/目录/symlink/特殊文件的 Bundle 均拒绝替换；失败保留旧数据。普通保存不能覆盖 Revision 历史档案，历史只能通过 Revision 提交 API 追加。
+
+读取、初始化、保存与 Revision 提交共享 Bundle 根目录同级、跨发布保留有效性的单写者锁。提交的读 head、base/transaction 检查、历史构造和发布都在持锁期间完成；同 base 竞争最多一个成功，失败可分类。读取也持锁，避免混合两个已提交状态。临时目录在发布前使用完整读取器及其资源预算验证，确保成功保存/提交的状态和全部历史可再次读回。此边界不实现 P5 的语义 rebase；崩溃残留锁需确认没有活跃操作后恢复，不能按年龄自动抢占。
+
+Bundle 公共 API 使用 `WorkbookBundleError.code` 区分结构/引用、路径、数据、I/O、资源超限、未支持版本、冲突与不安全目标；保留原始 cause 和文件/实体上下文。领域校验仍返回 issues，独立适配器维持自身错误契约。导入限制文件/总字节、文件数量、Revision 数、累计行数、JSON 深度/节点/容器/字符串以及 Parquet 行列/解码页预算；Parquet worker 可终止并有堆与时间限制。超限整体失败，全历史一致性校验继续执行。当前默认值、读取所需父目录写权限及恢复限制见 [Workbook Core README](../packages/workbook-core/README.md)。
+
+## 版本与扩展
+
+`formatVersion` 是 Bundle 主版本；每类 JSON 规格文档分别以 `specVersion` 声明自身主版本。v1 读者遇到不支持的主版本或未知的 `requiredFeatures` 时必须清楚失败，不得猜测或丢弃语义。向后兼容的可选属性放在 `metadata` 或 `extensions` 中；未知扩展可忽略并在透传 Bundle 时保留。改变现有字段语义或删除必需字段时提升相应主版本。未来数据库后端可以替代物理文件读写，但须维持相同的 Workbook、稳定 ID、规格边界和导入/读取语义。
 
 也可以逐步演进为数据库后端。
 
@@ -2380,7 +2556,7 @@ Revenue Trend
 Commit：
 
 ```text
-revision 12 → 13
+revision rev_01J... → rev_01K...
 ```
 
 Lineage：

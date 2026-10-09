@@ -17,6 +17,8 @@
 | Spreadsheet UI | **React + TypeScript + Glide Data Grid（Grid 暂定）** | React + TypeScript 作为 UI 基础，Glide 负责 Table 的交互和渲染，不持有权威数据。与 Univer 的比较验证见 Linear 前置 issue [LVB-98](https://linear.app/lvbingwu123/issue/LVB-98/p3-前置验证对比-glide-data-grid-与-univer)，完成后依据结果确认或调整 Grid 选型。Workbook、Table、Field、Row、Calculation、Transform、Revision、Transaction 与 Lineage 等语义和状态仍由本项目的领域模型及 WorkbookService 管理。选型依据见 [Spreadsheet_UI.md](Spreadsheet_UI.md)。 |
 | 应用宿主 | **嵌入 DeepSeek Harness Plugin** | Spreadsheet UI 作为 Harness 插件客户端嵌入；Harness 管理 Agent、Session、工具运行和权限，WorkbookService 保持独立并拥有 Spreadsheet 领域状态。插件包结构依据见 [proposal.md](proposal.md) §9–11。 |
 | Workbook 持久化 | **Workbook Bundle：JSON 元数据 + Parquet 表数据** | 作为 MVP 的可移植持久化边界；数据库后端可在需要时演进，但不改变 Workbook Bundle 的领域边界。选型依据见 [proposal.md](proposal.md) §49。 |
+| Workbook Domain / Bundle 初始实现 | **TypeScript（Node.js ESM）** | 在仓库引入一个独立的 Workbook 核心包，沿用 UI 的 TypeScript 语义类型；Node.js 是当前文件 Bundle 适配器的本地运行时选择，不预设最终 Harness 服务宿主。 |
+| Parquet I/O 初始适配器 | **hyparquet-writer + hyparquet** | 将读写封装在独立适配器后使用；Bundle manifest 与稳定 ID 合约不依赖该库。只写入能无损往返的字段类型，未支持的类型明确报错。 |
 | 计算引擎 | **DuckDB（运行宿主待验证）** | 用于 MVP 所需的结构化查询和分析运算；WorkbookService 仍负责领域校验、事务、Revision 与权威状态。Harness host/service 与插件 client/WASM 的运行位置由 Linear 前置 issue [LVB-99](https://linear.app/lvbingwu123/issue/LVB-99/p2-前置验证确认-duckdb-在-harness-插件中的运行宿主) 验证后确认。选型方向见 [proposal.md](proposal.md) §9、§56。 |
 | Computed Field 表达式 | **字段引用 DSL** | MVP 提供有限的字段引用表达式，并解析为使用稳定 Field ID 的计算 AST；不追求完整 Excel 公式兼容。具体文法、运算符和函数范围由 [LVB-81](https://linear.app/lvbingwu123/issue/LVB-81/实现-filter-sort-computed-field-与计算依赖) 明确。 |
 | 图表规格与渲染 | **Vega-Lite 规格；渲染器待定** | 图表以 Vega-Lite 声明式规格保存；具体渲染器留到 [LVB-88](https://linear.app/lvbingwu123/issue/LVB-88/实现-vega-lite-chart-spec-与图表操作) 实现时决定。 |

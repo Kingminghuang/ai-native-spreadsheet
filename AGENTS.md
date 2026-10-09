@@ -1,5 +1,10 @@
 # Repository Instructions
 
+## Design Principles
+
+1. **Codex readability comes first.** Make code, names, files, and system boundaries easy for Codex and other agents to understand, navigate, and debug. When design choices conflict, prefer the option that makes the codebase clearer and bugs easier to locate. Refactor files, directories, or architecture when doing so improves that clarity.
+2. **Design functionality as cohesive modules.** Give each module a clear responsibility and explicit interfaces so agents can understand and change parts of the system independently. Accept reasonable upfront structure to make the repository easier for all agents to understand, while keeping abstractions proportional to the functionality.
+
 When implementing or reviewing an issue from the `ai-native-spreadsheet` Linear project:
 
 1. Read [workflow.md](docs/workflow.md) and the issue's acceptance criteria.

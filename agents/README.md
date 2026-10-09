@@ -6,7 +6,7 @@ These Markdown files are reusable role instructions for Codex when implementing 
 
 For every issue:
 
-1. Read the Linear issue and its acceptance criteria, then read the linked sections of `../docs/proposal.md` and the matching instruction below.
+1. Read the Linear issue and its acceptance criteria, then read the linked sections of [proposal.md](../docs/proposal.md) and the matching instruction below.
 2. Inspect the current repository before making changes. The repository currently contains product specifications; do not assume an implementation stack that is not present.
 3. Keep changes within the issue scope. Preserve the Table-first semantic model and coordinate with neighboring roles when a change crosses a boundary.
 4. Report the implementation, files changed, acceptance evidence, checks performed, and any open questions or follow-up work. Do not mark a Linear issue complete unless asked to manage its status.
